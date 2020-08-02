@@ -1,0 +1,505 @@
+1. Paketleri yarat (response ,request , service ,service.impl , repository , dto , controller , entity)
+2.Iclerini doldur
+User Entity 
+private Long id
+private String userId
+private String firstname
+private String lastname
+private String email
+private String encryptedPassword
+private String emailVerificationToken
+private Boolean emailVerificationStatus
+private Integer active
+
+
+ResponseUser 
+private String userId
+private String firstname
+private String lastname
+private String email
+
+
+RequestUser
+private String firstname
+private String lastname
+private String email
+private String password
+
+UserDTO
+private Long id
+private String userId
+private String firstname
+private String lastname
+private String email
+private String encryptedPassword
+private String emailVerificationToken
+private Boolean emailVerificationStatus
+private Integer active
+
+
+3.Dependency olaraq spring boot starter security ve jwt nin dependencylerini elave et
+
+4.createUser metodu yarat controllerde ve onun userService interface indede metodunu yarat ve onuda userserviceImpl classinda implements et.
+ve bu class daxilinde yeni user yaratmadan once bu user database da var ya yox onu yoxlamaq lazmdir eger movcuddursa mesaj yollayriq ki bu user artiq movcuddur
+
+5.burda user in melumatlarini doldur , bunun ucun public user id generasiya eliyen Utils classi daxilinde bir metod yarad ve onu random UUID den generasiya et
+
+6.Passwordu encode etmek ucun Main class daxilinde bir 
+@Bean 
+public BCryptPasswordEncoder passwordEncoder(){
+	return new BCryptPasswordEncoder();
+}
+
+7.UserServiceImpl da bunu @Autowired annotationi ile elave et ve orada passwordu sifrele
+user.setEncryptedPassword(passwordEncoder.encode(userDTO.getPassword));
+
+8.Bu create user endpointsini unauthorized errorunu vermesin deye springe bunu tanitmaliyiq bunun ucunde birdene class yarat WebSecurity adinda.
+
+9.Bu class @Configuration ve @EnableWebSecurity annotation larini isdifade edir
+ve WebSecurityConfigurerAdapter classini extends edir
+
+10.Bu class daxilinde hem HttpSecurity hemde AuthenticationManagerBuilder parametrlerini qebul eden configure methodlarini override edirik
+
+11.Http security parametrini qebul eden metod daxilinde hansi url lerimiz ucun spring securityini deaktiv edecik onu qeyd edirik
+
+12.AuthenticationManagerBuilder parametrini qebul eden metod daxilinde ise passwordu kript edirik bunun ucun ise UserDetailsService ve BCryptPasswordEncoder classlarinin obyektlerini WebSecurity daxilinde onun constructoruna elave edib bu metod daxilinde asagidaki kodu yaziriq
+auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder);
+
+13.UserLoginRequest classi yarat 
+private String email;
+private String password;
+ 
+
+14.UserService interface imiz extends etmelidir UserDetailsService i
+
+15. sonra UserServiceImpl class imizda loadByUserName methodunu override edirik
+
+
+16.UserRepository interface inde
+User findByEmail(String email) adli metod yaradiriq ve loadByUsername metodunda 
+UserEntity userEntity = userRepository.findByEmail(email);
+
+if(user == null) throw UsernameNotFoundException(email)
+
+return new User(userEntity.getEmail() , userEntity.getEncryptedPassword() , new ArrayList<>());
+
+buradaki User Spring bu database daki user i  tanisin deye import edilmis class dir yeni bizim entity clasimiz deyil
+
+17.Bundan sonra Security Constants adinda class lar yaradiriq ve bu class daxilinde tokenimizin bitme vaxti (Expiration date) , Token Prefix (Bearer apdsaddasedq213$5234), bizim hanis url lerimize isdemirikse Spring security ile qorunsun onlari qeyd edirik ve onlari WebSecurity class inda Deyisdirik yeni dirnaq arasinda yazilmis kodlari bura elave edib burdaki propertyleri ise ora elave edirik 
+Security Constants da olan bezi propertyler
+	public static final long EXPIRATION_TIME = 864000000; // 10 days
+	public static final String TOKEN_PREFIX = "Bearer ";
+	public static final String HEADER_STRING = "Authorization";
+	public static final String SIGN_UP_URL = "/users"; // create user url
+	public static final String TOKEN_SECRET = "sadasd21341241";
+
+
+18.ApplicationFilter adinda class yaradiriq ve bu class UsernamePasswordAuthenticationFilter classini extends edir.
+
+19.attemptAuthentication metodunu override edirik
+
+20.Request e gelen melumatlari oxumaq ucun 
+asagidaki setri yaziriq 
+UserLoginRequest creds = new ObjectMapper(),readValue(request.getInputStream() , UserLoginRequest.class);
+
+21.Sonra ise 
+return authenticationManager.authenticate(
+new UsernamePasswordAuthenticationToken(creds.getEmail() , 
+creds.getPassword() , new ArrayList<>()));
+
+bunu yaziriq bu metod ise daxil olan email ve passworda gore bize token verecek yeni authentication attempt yeni token vermek ucun bir nov icaze verecek
+
+22.Sonra ise successfullAuthentication metodunu override edib icinde token yaradiriq
+  String token = Jwts.builder()
+	                .setSubject(((User) auth.getPrincipal()).getUsername())
+	                .setExpiration(new Date(System.currentTimeMillis() + SecurityConstants.EXPIRATION_TIME))
+	                .signWith(SignatureAlgorithm.HS512, SecurityConstants.TOKEN_SECRET)
+	                .compact();
+	        
+	        res.addHeader(SecurityConstants.HEADER_STRING, SecurityConstants.TOKEN_PREFIX + token);
+
+23.sonra ise bu filteri WebSecurity classinda authenticated dan sonra
+.and().addFilter(new AuthenticationFilter(authenticationManager())) bu formada yazriq
+
+http.csrf()
+				.disable()
+				.authorizeRequests()
+				.antMatchers(HttpMethod.POST, SecurityConstants.SIGN_UP_URL)
+				.permitAll()
+				.anyRequest()
+				.authenticated()
+				.and()
+				.addFilter(new AuthenticationFilter(authenticationManager()));
+
+
+24.Bunlari ettikden sonra artiq token headerda qayidacaq lakin biz headerda userId inide qaytarmaliyiq yeni public User id ni bunun ucun UserServiceImpl dan isdifade etmek lazmdir lakin biz userServiceImpl i @Autowired annotationi ile ApplicationFiltera ata bilmerik bunu etmek ucun birdene SpringApplicationContext adinda class yaradib asagidaki kodu ora atiriq
+
+public class SpringApplicationContext implements ApplicationContextAware {
+
+	private static ApplicationContext CONTEXT;
+
+	public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+		CONTEXT = applicationContext;
+	}
+
+	public static Object getBean(String beanName) {
+		return CONTEXT.getBean(beanName);
+	}
+}
+
+25.Bu classi yaratdiqdan sonra diger classlarinda bu classi gormesi ucun bu classi main metodunda @Bean kimi tanidiriq
+
+@Bean
+public SpringApplicationContext springApplicationContext(){
+return new SpringApplicationContext();
+}
+
+26.Bundan sonra UserService interface inde UserDTO getUser(String email) adinda metod yaradib onun icini UserServiceImpl da doldururuq orda yoxluyuruq
+
+UserEntity userEntity = userRepository.findByEmail(email);	
+
+		if (userEntity == null)
+			throw new UsernameNotFoundException(email);
+
+
+
+
+27.BUndan sonra ApplicationFilterda succesfulAuthenticate metodunda bu classin obyektini cagirib onun username ini oturuk UserServiceImpl daki getUser metoduna ve ordan qayidan neticedeki public userId ini elave edirik headera
+	UserService userService = (UserService) SpringApplicationContext.getBean("userServiceImpl");
+	UserDTO userDTO = userService.getUser(username);
+
+	res.addHeader("UserId", userDTO.getUserId());
+
+28.Sonra default login olmaq ucun olan url /login di biz o url i deyismek isdesek bu formada etmeliyik 
+
+public AuthenticationFilter getAuthenticationFilter() throws Exception {
+		AuthenticationFilter filter = new AuthenticationFilter(authenticationManager());
+		filter.setFilterProcessesUrl("/users/login");
+		return filter;
+}
+
+sonra ise bu metodu web security deki http de addFilter hissesinde cagirirq
+
+http.csrf()
+				.disable()
+				.authorizeRequests()
+				.antMatchers(HttpMethod.POST, SecurityConstants.SIGN_UP_URL)
+				.permitAll()
+				.anyRequest()
+				.authenticated()
+				.and()
+				.addFilter(getAuthenticationFilter()); //Sonuncu odur 
+
+
+
+29.BUndan sonra gelen her bir requestde spring bizden token gozleyecek bunu ama biz tokeni bu formada yollasaq o qebul etmeyecey bunun ucun bir class yaratmaq lazmdi 
+AuthorizationFilter adinda class yaradib bu class daxilinde gelen tokenin yoxlamaq lazmdir ve buna uygun olaraq adama cavab qaytarmaq lazmdi AuthorizationFilter class inin daxili ise bu formada olacaq
+
+public class AuthorizationFilter extends BasicAuthenticationFilter {
+
+	public AuthorizationFilter(AuthenticationManager authManager) {
+		super(authManager);
+	}
+
+	@Override
+	protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
+			throws IOException, ServletException {
+
+		String header = req.getHeader(SecurityConstants.HEADER_STRING);
+
+		if (header == null || !header.startsWith(SecurityConstants.TOKEN_PREFIX)) {
+			chain.doFilter(req, res);
+			return;
+		}
+
+		UsernamePasswordAuthenticationToken authentication = getAuthentication(req);
+		SecurityContextHolder.getContext().setAuthentication(authentication);
+		chain.doFilter(req, res);
+	}
+
+	private UsernamePasswordAuthenticationToken getAuthentication(HttpServletRequest request) {
+		String token = request.getHeader(SecurityConstants.HEADER_STRING);
+
+		if (token != null) {
+
+			token = token.replace(SecurityConstants.TOKEN_PREFIX, "");
+
+			String user = Jwts.parser()
+					.setSigningKey(SecurityConstants.TOKEN_SECRET)
+					.parseClaimsJws(token).getBody()
+					.getSubject();
+
+			if (user != null) {
+				return new UsernamePasswordAuthenticationToken(user, null, new ArrayList<>());
+			}
+
+			return null;
+		}
+
+		return null;
+	}
+}
+
+
+
+30.Bu clasida yaratdiqdan sonra bu classinda filterini aparib WebSecurity class inda addFilter deye elave edirik ki gelen her bir requesti yoxlasin bu class 
+
+http.csrf()
+				.disable()
+				.authorizeRequests()
+				.antMatchers(HttpMethod.POST, SecurityConstants.SIGN_UP_URL)
+				.permitAll()
+				.anyRequest()
+				.authenticated()
+				.and()
+				.addFilter(getAuthenticationFilter())
+				.addFilter(new AuthorizationFilter(authenticationManager())); // sonuncudur 
+
+
+
+31.Email Tesdiqlemesi ucun:
+
+
+32.Emailin endpointini yeni email tesdiqlenecey olan url i Web Security classina elave edirik ki Spring hemin url ucun bizden Token teleb etmesin cunki bu url login zamani isdifadecilerin seyfeye register yeni account yaratdiqlari zaman biz arxada token generasiya edib hemin tokeni yollayaciq hemin adamin emailine ve adamda emailine daxil olub onu tesdiqleyecey , 
+www.example.com/users/email-verification?token=amdiqjwiej182u41e089u081u23e0891u10
+bu formada bir link gedecey ama adam bunu gormeyecey cunki biz ona mesaj yolladiqimizda her hansi bir kicik html css formasinda bir mesaj yollayaciq oda sadece buttona basacaq butona basdiqdan sonra yonlendirilen seyfede o tokeni gore biler ve acilan seyfedede artix onun tokenine gore emailini tesdiqleyeciy ve o artix tekrar tekrar login olmayacaq
+
+
+33.Web Security e o url i elave etdikden sonra Web Security bu formada olacaq
+
+http.csrf()
+		.disable()
+		.authorizeRequests()
+		.antMatchers(HttpMethod.POST, SecurityConstants.SIGN_UP_URL)
+		.permitAll()
+		.antMatchers(HttpMethod.GET , SecurityConstants.EMAIL_VERIFICATION_URL) //yeni elave olunan
+		.permitAll()
+		.anyRequest()
+		.authenticated()
+		.and()
+		.addFilter(getAuthenticationFilter())
+		.addFilter(new AuthorizationFilter(authenticationManager()));
+
+
+
+34.Sonra UserController de email-verification url i olan bir GetMapping yaradiriq ve bu metodda emailin tesdiqlenmesi ucun boolean isVerified = userService.verifyEmail(token); bele bir metodu yaradiriq ve bu metodda biz tokeni yoxlayiriq tokenin vaxti bitib mi yoxsa yox deye buna baxiriq sora bu tokene uygun olaraq bazada tokene uygun olan adami tapiriq bu token ise bazada email_verification_token columnu altinda oturur bunu ise create user metodunda generasiya edib bazaya elave etmek lazimdir.
+
+
+
+35.BU metodu yaratdiqdan sonra implements edib icini dolduruq
+ilk once bu token kime aid oldugunu tapmaq ucun bir metod yaradiriq 
+UserEntity userEntity = userRepository.findByEmailVerificationToken(token);
+bu metodu yaratdiqdan sonra yoxlayiriq ki userEntity null dan ferqlidirse demeli bele bir isdifadeci var ve ondan sonra ise token in vaxti bitib yoxsa yox bunu yoxluyuruq bunun ucnde Util classinda bidene hasExpired adinda bir metod yaradiiriq ve hemin metod false qaytararsa demeli bu token helede quvvededir ondan sonra artiq hemin tokene uygun olan isdifadecininn email_verification_status columnu true eliyirik ki artiq qeydiyyatdan kece bilsin cunki artiq email tesdiqlenib 
+
+public boolean verifyToken(String token) {
+		boolean isVerified = false;
+
+		UserEntity userEntity = userRepository.findByEmailVerificationToken(token);
+		if (userEntity != null) {
+			boolean hasExpired = util.hasTokenExpired(token);
+			if (!hasExpired) {
+				userEntity.setEmailVerificationToken(null);
+				userEntity.setEmailVerificationStatus(Boolean.TRUE);
+				userRepository.save(userEntity);
+				isVerified = true;
+			}
+		}
+
+		return isVerified;
+	}
+
+
+36.Novbeti utils classinda ki hasExpired metodunu yazmaq lazimdir burda biz tokene uygun olaraq hemin tokenin melumatlarini almaq ucun Claims den isdifade ederek asagidaki setri yaziriq
+		Claims claims = Jwts.parser()
+				.setSigningKey(SecurityConstants.TOKEN_SECRET)
+				.parseClaimsJws(token)
+				.getBody();
+
+Bu setr bize tokenin subjectini expirationDate ni ve bawqa diger ozellikleri verir bundan sonra ise tokenin vaxti bitib ya yox buna baxmaliyiq bunun ucun ise biz token yaratdiqimizda hemise hemin tokenin expirationDate inin uzerine yaradilan andaki vaxti gelirdik yeni deyeyki ayin  3 yaranibsa token ve bitme vaxti 2 gundurse o zaman ayin 5 ine kimi vaxt var biz ise bu metodda ayin tarixi 5 ini kecibmi ya kecmeyibmi bunu yoxlayiriq bunun ucnude asagidaki kodu yaziriq
+
+		Date tokenExpirationDate = claims.getExpiration(); // 1
+		Date today = new Date(); // 2
+		
+		return tokenExpirationDate.before(today); / 3
+
+
+1-ci setr de biz tokeninn bitme vaxtini elde edirik 
+2-ci setrde biz bugun ayin necesidir onu yoxluyuruq
+3-cu setrde eger tokeninExpirationDate i bugunden evveldirse yeni bugun ayin 6 sidirsa ama token ayin 5 inde bitibse tokenExpirationDate.before(today); -- bu bize true verecey eger bitibse bitmeyibse false verecey ve bzide ona uygun olan isleri verifyEmail metodunda edecik.
+
+
+
+
+37.Sonra createUser metodunda biz generateEmailVerificationToken adinda bir metod yaradiriq Util classinda sonra bu metoddan qayidacaq olan tokeni ise tesdiqlemek ucun novbeti merhelede tesdiqlemek ucun token generasiya edib bunu bazaya elave etmek lazimdir bunun ucnde asagidaki metodu yaradiriq
+user.setEmailVerificationToken(util.generateEmailVerificationToken(user.getUserId()));
+
+bu metodda ise token generasiya edib geriye yollayiriq 
+
+public String generateEmailVerificationToken(String userId) {
+		String token = Jwts.builder()
+				.setSubject(userId)
+				.setExpiration(new Date(System.currentTimeMillis() + SecurityConstants.EXPIRATION_TIME))
+				.signWith(SignatureAlgorithm.HS512, SecurityConstants.TOKEN_SECRET)
+				.compact();
+		
+		return token;
+	}
+
+
+38.BUnlari etdikden sonra emailVerificationStatusuda false etmeliykki cunki biz email verificationStatus a uygun olaraq yoxlayaciqki bu true dusa demeli email tesdiqlenib yox eger false dusa demeli tesdiqlenmiyib email
+bunun ucunde createUser metodunda emailVerificationToken generasiya etdikden sonra emailVerificationStatusu null edirik
+		user.setEmailVerificationStatus(false);
+
+39.biz login metoduna request yolladiqimizda o en birinci olaraq loadByUsername metoduna gedr ve bu metodda o username ve sifreye uygun olaraq yeni bir User yaradir bazadan gelen usere uygun olan bir user yaradir ve bu useri spring e tanidir ve bu Useri yaradarken constructordan isdifade edir ve o constructorda username , password , enabled , accountExpired , authorities kimi parametrler qebul edir burda username e bazadan gelen usernamei yaziriq , passworda bazadan gelen passwordu yaziriq , enabled hissesi ise bu isdifadeci yeni aktivdirmi aktiv deyilmi bizim yazdiqimiz applikasiyada bu aktivlik email verification status dur yeni isdifadeeci yeni user yaratdiqdan sonra eger emailini tesdiqlemesse demeli login ola bilmeyecey ve o eger qeydiyyatdan kecdikden sonra emailini tesdiqlese ondan sonra artiq email tesdiqlenecey ve bazada olan email verification status artiq true olacaq ve Spring cox rahatliqla yeni user yaradacaq onuda bu formada yazaciq loadByUsername metodunda 
+
+public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+		UserEntity userEntity = userRepository.findByEmail(email);
+
+		if (userEntity == null)
+			throw new UsernameNotFoundException(email);
+
+		return new User(userEntity.getEmail(), userEntity.getEncryptedPassword(), new ArrayList<>());
+
+	return new User(userEntity.getEmail(), userEntity.getEncryptedPassword(), userEntity.getEmailVerificationStatus(),
+				true, true, true, new ArrayList<>());
+	}
+
+
+
+40.Password Reset 
+Demeli parolun deyisdirilmesi ucun ilk novbede biz parolu deyisdirmek ucun bir url yaratmaliyiq ve bu url e request yollayiriq lakin gelen request gizli olsun deye yeni mail addresi gizli olsun deye biz hemin maili url de deyilde RequestBody ile yollamaliyiq bunun ucun RequestPasswordReset adinda bir class yaradiriq ve icine email propertysini atiriq
+ondan sonra UserController de birdene PostMapping metodu yaradiriq , ve bu metod RequestBody olaraq RequestPasswordResetToken classinin obyektini qebul edir.Bu metod Emaile mesaj gondermek ucun isdifade olunur
+
+@PostMapping(value = "/password-reset", consumes = { MediaType.APPLICATION_XML_VALUE,
+			MediaType.APPLICATION_JSON_VALUE }, produces = { MediaType.APPLICATION_XML_VALUE,
+					MediaType.APPLICATION_JSON_VALUE })
+	public ResponseStatus passwordReset(@RequestBody RequestPasswordReset requestPasswordReset) {
+		ResponseStatus response = null;
+		
+		boolean isReset = userService.passwordReset(requestPasswordReset.getEmail());
+
+		if(isReset)
+			response = new ResponseStatus(1, "Password has been successfuly reseted...");
+		else
+			response = new ResponseStatus(102, "Password Reset Error");
+		
+		return response;
+	}
+
+
+
+41.Sonra passwordReset metodunu yaradib UserServiceImpl da icini dolduraq.
+
+
+42.BUrda biz gonderilen emaile gore findByEmail metodu ile hemin useri tapiriq.
+
+43.Sonra biz bu user ucun password reset token adinda bir table yaratmaliyiq bazada bunun ucnde PasswordResetTokenEntity adinda bir class yaradiriq ve bu classin iki parametri olur birinci token ikinci ise UserEntity
+
+private String token 
+
+@OneToOne
+@JoinColumn(name = "user_id")
+private UserEntity user;
+
+
+44.Bunu yaratdiqdan sonra user parolunu deyismesi ucun bir token generasiya etmeliyik bunun ucnde util classinda generatePasswordResetToken adinda bir metod yaradiriq ve bu metod bizden userEntity.getUserId() paramterini qebul edir ve geriye token  qaytarir.
+
+String token = util.generatePasswordResetToken(userEntity.userId());
+
+45.Bu metodu yaratdiqdan sonra generasiya olunmus tokeni bazadaki cedvelde saxlayiriq ve bu cedvelde hemde userin id sini de saxlayiriq
+
+46. 
+PasswordResetTokenEntity passwordResetToken = new PasswordResetTokenEntity();
+passwordResetToken.setToken(token);
+passwordResetToken.setUser(userEntity);
+
+
+47. Binlari bazada saxlamaq ucun ise bizim repository interface imize ehtiyac yaranir. Bunun ucunde BIrdene 
+PasswordResetTokenRepository adinda interface yaradib CrudRepositoryden extends edirik.
+
+48.PasswordResetTokenRepository  interface inin obyektini @Autowired edib atiriq UserServiceImpl a 
+
+
+49. sonra ise deyisiklikleri bazaqya save etmek ucun passwordResetTokenRepository.save(passwordResetToken); yaziriq
+
+PasswordResetTokenEntity passwordResetToken = new PasswordResetTokenEntity();
+passwordResetToken.setToken(token);
+passwordResetToken.setUser(userEntity);
+passwordResetTokenRepository.save(passwordResetToken); 
+
+50.Ve Bu metod daxilinde yeni (UserServiceImpl classinin passwordReset metodu daxilinde bu tokeni biz isdifadecinin emailine mesaj olaraq yollayiriq) ve isdifadeci oz emailine daxil olaraq ona gelen mesajdaki linke daxil olub parolunu deyisdirir.
+
+
+51.Util classimizda generasiya olan tokenin bitme vaxtini 1 saat qoymaliyiq bunun ucnde SecurityConstants adinda olan classda 
+public static final long PASSWORD_RESET_EXPIRATION_TIME = 3600000;// 1 hour
+bele yaziriq
+
+ve Sonra token generasiya olunan yerde ise EXPIRATION_TIME -i PASSWORD_RESET_EXPIRATION_TIME edirik.
+
+
+52.Bundan sonra spring bizden password-reset endpointi ucun token teleb etmesin deye biz bu endpointi public etmeliyik buna gorede WebSecurity classinda bunu qeyd edirik
+
+
+53.Novbeti artiq biz emaile gelen linke click ederek hemin linke daxil olub sifremizi deyisdirik bunu ettikden sonra ise isdifadeci request yollayir ve biz bu request ucun metod yaradiriq ve gonderilen passwordu deyisdiririk ve ondan sonra ise tokeni de null edirik ki isdifadeci daxil olduqdan sonra defelerle deyisdirmesin yeniden deyisdirmek isdiyende birde bawqa token generasiya olunacaq.
+
+
+54.Password Reset etmek ucun password-reset adinda bir metod yaradiriq
+
+55.Isdifadeci passwordu reset ettikden sonra bize hem onun yeni sifresi ve hemde token gelmelidir bunun ucun ise birdene RequestPasswordChange  adinda bir request model yaradiriq . 
+
+
+56.Bu modelin token ve password adinda 2 parametri olur.
+
+
+57.Novbeti ise biz /password-reset metodunda userService classi ucun passwordReset adinda metoda hem tokeni hemde passwordu yollayiriq ve metodu userService interface inde yaradiriq.
+
+boolean isResetPassword = userService.passwordReset(passwordChange.getToken() , passwordChange.getPassword());
+
+58.Sonra bu metodu implements edib icni doldururuq.
+
+59.Bu metod daxilinde biz tokenin expired olub olmadiqini yoxlayiriq
+
+	if(util.hasTokenExpired(token))
+		return isReset;
+		
+
+60.Bunda sonra ise biz gelen tokene gore bu hansi isdifadeciye aid oldugunu tapmaq ucun PasswordResetToken interface nin findByToken metodundan isdifade edirik.
+
+61.Tapilan token e gore eger her hansi bir sey tapilmassa false olaraq geri qaytaririq
+
+		if(passwordResetTokenEntity == null)
+			return isReset;
+		
+62.Bundan sonra ise gonderilen sifreni encode edirik.
+
+String encodedPassword = passwordEncoder.encode(password);
+
+
+63.Encryptlestirilmis passwordu bazadaki Userin evvelki sifre si ile deyisdirmek ucun ise 
+UserEntity userEntity = passwordResetTokenEntity.getUser();
+userEntity.setEncryptedPassword(encodedPassword);
+
+bunu menimsedirik, deyisiklikleri yadda saxlamaq ucun ise 
+UserEntity savedUserEntity = userRepository.save(userEntity) metodundan isdifade edirik .
+
+
+64.Eger 
+	if(savedUserEntity != null && savedUserEntity.getEncryptedPassword().equalsIgnoreCase(encodedPassword)){
+			isReset = true;
+	}
+		
+		
+65. Sonrada tokeni bazadan silirik      
+		//delete token from database
+		passwordResetTokenRepository.delete(passwordResetTokenEntity);
+		
+66.Sonuncu olaraq ise password-reset endpointi ucun token teleb olunmasin deye WebSecurity classinda bu endpointi public edirik.
+
+
+
+
+
+
+
+ 	
+ 
